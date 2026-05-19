@@ -21,9 +21,11 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 from app.goal_suggestion import (
     GoalSuggestRequest,
     GoalValidateRequest,
+    GoalCustomRefineRequest,
     GoalConfirmRequest,
     suggest_goals_by_ai,
     validate_goal_by_ai,
+    refine_custom_goal_by_ai,
     save_goal_to_supabase
 )
 
@@ -213,7 +215,7 @@ def get_current_user(current_user = Depends(verify_token)):
 
 @app.post("/api/goals/suggest")
 def suggest_goals(data: GoalSuggestRequest):
-    goals = suggest_goals_by_ai(data.skills)
+    goals = suggest_goals_by_ai(data)
 
     return {
         "message": "Goal suggestions generated successfully",
@@ -225,11 +227,7 @@ def suggest_goals(data: GoalSuggestRequest):
 
 @app.post("/api/goals/validate")
 def validate_goal(data: GoalValidateRequest):
-    result = validate_goal_by_ai(
-        goal_title=data.goal_title,
-        goal_technique=data.goal_technique,
-        skills=data.skills
-    )
+    result = validate_goal_by_ai(data)
 
     return {
         "message": "Goal validation completed",
@@ -237,6 +235,13 @@ def validate_goal(data: GoalValidateRequest):
         "name": data.name,
         "result": result
     }
+
+
+@app.post("/api/goals/custom/refine")
+def refine_custom_goal(data: GoalCustomRefineRequest):
+    result = refine_custom_goal_by_ai(data)
+
+    return result
 
 
 @app.post("/api/goals/confirm")
