@@ -1,14 +1,15 @@
 import os
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, status, Depends, Header
+from pydantic import BaseModel, EmailStr
 from typing import List
 from dotenv import load_dotenv
 from supabase import create_client
-from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 # Load biến môi trường
 load_dotenv()
 security = HTTPBearer()
+
 # Kết nối Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -39,54 +40,61 @@ class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
 
+# Giữ cả RegisterRequest của bạn và LoginRequest của Triệu
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+
 class LoginRequest(BaseModel):
     email: str
     password: str
 
+
 # =========================
 # POST API
 # =========================
+def get_level_from_rating(rating_level: int):
+    level_mapping = {
+        1: "Beginner",
+        2: "Elementary",
+        3: "Intermediate",
+        4: "Advanced",
+        5: "Expert"
+    }
+
+    return level_mapping.get(rating_level, "Unknown")
 
 @app.post("/api/skills/assess")
 def assess_skills(data: SkillAssessmentRequest):
     rows = []
 
-    # Chuẩn bị data insert
     for item in data.ratings:
+        level = get_level_from_rating(item.rating_level)
+
         rows.append({
             "user_id": data.user_id,
             "skills_name": item.skill_name,
             "rating_level": item.rating_level
         })
 
-    # Insert vào Supabase
     supabase.table("user_skills").insert(rows).execute()
 
-    # Tính average score
-    average_score = (
-        sum(item.rating_level for item in data.ratings)
-        / len(data.ratings)
-    )
+    summary = []
 
-    # Xác định level
-    if average_score <= 2:
-        level = "Beginner"
-    elif average_score <= 3.5:
-        level = "Intermediate"
-    else:
-        level = "Advanced"
+    for item in data.ratings:
+        summary.append({
+            "skill_name": item.skill_name,
+            "rating_level": item.rating_level,
+            "level": get_level_from_rating(item.rating_level)
+        })
 
     return {
         "message": "Skill assessment saved successfully",
         "summary": {
             "user_id": data.user_id,
-            "average_score": round(average_score, 2),
-            "level": level,
-            "ratings": rows
+            "ratings": summary
         }
     }
-
-
 # =========================
 # GET API
 # =========================
@@ -109,27 +117,37 @@ def get_skill_profile(user_id: str):
             "summary": None
         }
 
-    average_score = (
-        sum(item["rating_level"] for item in ratings)
-        / len(ratings)
-    )
+    summary = []
 
-    if average_score <= 2:
-        level = "Beginner"
-    elif average_score <= 3:
-        level = "Intermediate"
-    else:
-        level = "Advanced"
+    for item in ratings:
+        summary.append({
+            "skill_name": item["skills_name"],
+            "rating_level": item["rating_level"],
+            "level": get_level_from_rating(item["rating_level"])
+        })
 
     return {
         "message": "Skill profile fetched successfully",
         "summary": {
             "user_id": user_id,
-            "average_score": round(average_score, 2),
-            "level": level,
-            "ratings": ratings
+            "ratings": summary
         }
-    } # Đã thêm dấu ngoặc nhọn bị thiếu ở đây!
+    }
+
+@app.get("/api/skills")
+def get_skills():
+
+    result = (
+        supabase
+        .table("skills")
+        .select("*")
+        .execute()
+    )
+
+    return {
+        "message": "Skills fetched successfully",
+        "skills": result.data
+    }
 
 
 @app.get("/")
@@ -138,11 +156,24 @@ def read_root():
         "message": "Scrum AI Coach Backend is running"
     }
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
+def verify_token(authorization: str = Header(...)):
+    if authorization is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authorization token"
+        )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token format"
+        )
+
+    token = authorization.replace("Bearer ", "")
 
     try:
         user = supabase.auth.get_user(token)
+
         return user.user
 
     except Exception:
@@ -150,6 +181,8 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             status_code=401,
             detail="Invalid or expired token"
         )
+
+
 @app.get("/api/auth/me")
 def get_current_user(current_user = Depends(verify_token)):
     return {
@@ -160,6 +193,10 @@ def get_current_user(current_user = Depends(verify_token)):
         }
     }
 
+
+# =========================
+# GOALS API
+# =========================
 
 @app.post("/api/goals/suggest")
 def suggest_goals(data: GoalSuggestRequest):
@@ -197,29 +234,3 @@ def confirm_goal(data: GoalConfirmRequest):
         "message": "Goal saved to Supabase successfully",
         "saved_goal": saved_goal
     }
-
-@app.post("/api/auth/login")
-def login(data: LoginRequest):
-    try:
-        result = supabase.auth.sign_in_with_password({
-            "email": data.email,
-            "password": data.password
-        })
-
-        return {
-            "message": "Login successful",
-            "user": {
-                "id": result.user.id,
-                "email": result.user.email
-            },
-            "access_token": result.session.access_token,
-            "refresh_token": result.session.refresh_token,
-            "token_type": "bearer"
-        }
-
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password"
-        )
-    
