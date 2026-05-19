@@ -1,6 +1,6 @@
 import os
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, EmailStr
 from typing import List
 from dotenv import load_dotenv
 from supabase import create_client
@@ -37,6 +37,15 @@ class SkillRating(BaseModel):
 class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
+
+
+# =========================
+# AUTH / REGISTRATION
+# =========================
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
 
 # =========================
 # POST API
@@ -80,6 +89,49 @@ def assess_skills(data: SkillAssessmentRequest):
             "ratings": rows
         }
     }
+
+
+@app.post("/api/auth/register")
+def register_user(data: RegisterRequest):
+    try:
+        # 🔥 IMPORTANT: convert EmailStr -> string
+        email = str(data.email).strip()
+        password = data.password.strip()
+
+        # Validate password (Supabase yêu cầu >= 6 ký tự)
+        if len(password) < 6:
+            raise HTTPException(400, "Password must be at least 6 characters")
+
+        # ===== REGISTER WITH SUPABASE AUTH =====
+        response = supabase.auth.sign_up({
+            "email": email,
+            "password": password
+        })
+
+        # SDK mới trả object -> lấy user trực tiếp
+        user = response.user
+
+        if not user:
+            raise HTTPException(400, "Registration failed")
+
+        # ===== INSERT PROFILE TO accounts TABLE =====
+        try:
+            supabase.table("accounts").insert({
+                "auth_uid": user.id,
+                "email": email
+            }).execute()
+        except Exception as e:
+            # Không làm fail đăng ký nếu insert profile lỗi
+            print("Insert accounts error:", e)
+
+        return {
+            "message": "User registered successfully",
+            "user_id": user.id,
+            "email": email
+        }
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # =========================
