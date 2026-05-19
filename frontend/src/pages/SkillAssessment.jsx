@@ -16,26 +16,37 @@ export default function SkillAssessment() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedLevel, setSelectedLevel] = useState(null);
 
+  // 1. Fetch data từ Backend thật
   useEffect(() => {
     assessmentApi.getSkills()
-      .then(response => setCourses(response.data))
-      .catch(err => console.error(err));
+      .then(data => {
+        if (data && data.skills) {
+          setCourses(data.skills);
+        }
+      })
+      .catch(err => console.error("Error loading skills:", err));
   }, []);
 
+  // 2. Hàm reset state (Hàm này đang bị thiếu gây ra lỗi của bạn)
   const handleReselect = () => {
     setSelectedCourse(null);
     setSelectedLevel(null);
     setView('LIST');
   };
 
+  // 3. Hàm submit data về Backend
   const handleSubmitToBackend = async () => {
     if (!selectedLevel) return;
     setView('GENERATING'); 
 
     const payload = {
-      course_id: selectedCourse.id,
-      course_name: selectedCourse.name,
-      rating_level: selectedLevel
+      user_id: "test-user-id-123", // Dùng tạm ID để test
+      ratings: [
+        {
+          skill_name: selectedCourse.name,
+          rating_level: selectedLevel
+        }
+      ]
     };
 
     try {
@@ -47,7 +58,6 @@ export default function SkillAssessment() {
     }
   };
 
-  // Helper render thanh tiến trình
   const renderProgress = (progress) => (
     <div className="progress-container">
       <div className="progress-bar" style={{ width: `${progress}%` }}></div>
@@ -83,9 +93,21 @@ export default function SkillAssessment() {
     );
   }
 
-  // ================= VIEW 3: REVIEW (MỚI) =================
+  // ================= VIEW 3: REVIEW =================
   if (view === 'REVIEW') {
-    const levelData = RATING_LEGEND.find(l => l.score === selectedLevel);
+    const levelData = RATING_LEGEND.find(l => l.score === Number(selectedLevel)) || {};
+
+    if (!selectedCourse || !levelData.score) {
+      return (
+        <div className="mobile-container">
+          <div className="glass-card text-center">
+            <h3>Oops, data lost!</h3>
+            <button className="btn btn-primary" onClick={handleReselect}>Start Over</button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="mobile-container slide-left">
         {renderProgress(100)}
@@ -161,7 +183,14 @@ export default function SkillAssessment() {
       
       <div className="course-grid">
         {courses.map((course) => (
-          <div key={course.id} className="course-card" onClick={() => setSelectedCourse(course) || setView('RATE')}>
+          <div 
+            key={course.id} 
+            className="course-card" 
+            onClick={() => {
+              setSelectedCourse(course);
+              setView('RATE');
+            }}
+          >
             <div className="course-img-wrapper">
               <img src={course.image} alt={course.name} className="course-img" onError={(e) => e.target.style.display='none'} />
             </div>
