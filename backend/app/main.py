@@ -1,14 +1,15 @@
 import os
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, status, Depends, Header
+from pydantic import BaseModel, EmailStr
 from typing import List
 from dotenv import load_dotenv
 from supabase import create_client
-from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
 # Load biến môi trường
 load_dotenv()
 security = HTTPBearer()
+
 # Kết nối Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -39,9 +40,15 @@ class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
 
+# Giữ cả RegisterRequest của bạn và LoginRequest của Triệu
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+
 class LoginRequest(BaseModel):
     email: str
     password: str
+
 
 # =========================
 # POST API
@@ -87,6 +94,77 @@ def assess_skills(data: SkillAssessmentRequest):
     }
 
 
+# Code phần Đăng ký (Registration) của bạn
+@app.post("/api/auth/register")
+def register_user(data: RegisterRequest):
+    try:
+        # 🔥 IMPORTANT: convert EmailStr -> string
+        email = str(data.email).strip()
+        password = data.password.strip()
+
+        # Validate password (Supabase yêu cầu >= 6 ký tự)
+        if len(password) < 6:
+            raise HTTPException(400, "Password must be at least 6 characters")
+
+        # ===== REGISTER WITH SUPABASE AUTH =====
+        response = supabase.auth.sign_up({
+            "email": email,
+            "password": password
+        })
+
+        # SDK mới trả object -> lấy user trực tiếp
+        user = response.user
+
+        if not user:
+            raise HTTPException(400, "Registration failed")
+
+        # ===== INSERT PROFILE TO accounts TABLE =====
+        try:
+            supabase.table("accounts").insert({
+                "auth_uid": user.id,
+                "email": email
+            }).execute()
+        except Exception as e:
+            # Không làm fail đăng ký nếu insert profile lỗi
+            print("Insert accounts error:", e)
+
+        return {
+            "message": "User registered successfully",
+            "user_id": user.id,
+            "email": email
+        }
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# Code phần Đăng nhập (Login) của Triệu
+@app.post("/api/auth/login")
+def login(data: LoginRequest):
+    try:
+        result = supabase.auth.sign_in_with_password({
+            "email": data.email,
+            "password": data.password
+        })
+
+        return {
+            "message": "Login successful",
+            "user": {
+                "id": result.user.id,
+                "email": result.user.email
+            },
+            "access_token": result.session.access_token,
+            "refresh_token": result.session.refresh_token,
+            "token_type": "bearer"
+        }
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+
 # =========================
 # GET API
 # =========================
@@ -129,7 +207,7 @@ def get_skill_profile(user_id: str):
             "level": level,
             "ratings": ratings
         }
-    } # Đã thêm dấu ngoặc nhọn bị thiếu ở đây!
+    }
 
 
 @app.get("/")
@@ -137,6 +215,7 @@ def read_root():
     return {
         "message": "Scrum AI Coach Backend is running"
     }
+
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
@@ -150,6 +229,8 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             status_code=401,
             detail="Invalid or expired token"
         )
+
+
 @app.get("/api/auth/me")
 def get_current_user(current_user = Depends(verify_token)):
     return {
@@ -160,6 +241,10 @@ def get_current_user(current_user = Depends(verify_token)):
         }
     }
 
+
+# =========================
+# GOALS API
+# =========================
 
 @app.post("/api/goals/suggest")
 def suggest_goals(data: GoalSuggestRequest):
@@ -197,29 +282,3 @@ def confirm_goal(data: GoalConfirmRequest):
         "message": "Goal saved to Supabase successfully",
         "saved_goal": saved_goal
     }
-
-@app.post("/api/auth/login")
-def login(data: LoginRequest):
-    try:
-        result = supabase.auth.sign_in_with_password({
-            "email": data.email,
-            "password": data.password
-        })
-
-        return {
-            "message": "Login successful",
-            "user": {
-                "id": result.user.id,
-                "email": result.user.email
-            },
-            "access_token": result.session.access_token,
-            "refresh_token": result.session.refresh_token,
-            "token_type": "bearer"
-        }
-
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email or password"
-        )
-    
