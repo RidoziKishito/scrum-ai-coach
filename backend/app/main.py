@@ -4,11 +4,9 @@ from pydantic import BaseModel, EmailStr
 from typing import List
 from dotenv import load_dotenv
 from supabase import create_client
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # Load biến môi trường
 load_dotenv()
-security = HTTPBearer()
 
 # Kết nối Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -53,6 +51,31 @@ class LoginRequest(BaseModel):
 # =========================
 # POST API
 # =========================
+def verify_token(authorization: str = Header(...)):
+    if authorization is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authorization token"
+        )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token format"
+        )
+
+    token = authorization.replace("Bearer ", "")
+
+    try:
+        user = supabase.auth.get_user(token)
+
+        return user.user
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
 def get_level_from_rating(rating_level: int):
     level_mapping = {
         1: "Beginner",
@@ -65,7 +88,7 @@ def get_level_from_rating(rating_level: int):
     return level_mapping.get(rating_level, "Unknown")
 
 @app.post("/api/skills/assess")
-def assess_skills(data: SkillAssessmentRequest):
+def assess_skills(data: SkillAssessmentRequest, current_user = Depends(verify_token)):
     rows = []
 
     for item in data.ratings:
@@ -100,7 +123,7 @@ def assess_skills(data: SkillAssessmentRequest):
 # =========================
 
 @app.get("/api/skills/profile")
-def get_skill_profile(user_id: str):
+def get_skill_profile(user_id: str, current_user = Depends(verify_token)):
     result = (
         supabase
         .table("user_skills")
@@ -155,32 +178,6 @@ def read_root():
     return {
         "message": "Scrum AI Coach Backend is running"
     }
-
-def verify_token(authorization: str = Header(...)):
-    if authorization is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authorization token"
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token format"
-        )
-
-    token = authorization.replace("Bearer ", "")
-
-    try:
-        user = supabase.auth.get_user(token)
-
-        return user.user
-
-    except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token"
-        )
 
 
 @app.get("/api/auth/me")
