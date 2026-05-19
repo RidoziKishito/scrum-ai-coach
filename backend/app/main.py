@@ -46,47 +46,48 @@ class LoginRequest(BaseModel):
 # =========================
 # POST API
 # =========================
+def get_level_from_rating(rating_level: int):
+    level_mapping = {
+        1: "Beginner",
+        2: "Elementary",
+        3: "Intermediate",
+        4: "Advanced",
+        5: "Expert"
+    }
+
+    return level_mapping.get(rating_level, "Unknown")
 
 @app.post("/api/skills/assess")
 def assess_skills(data: SkillAssessmentRequest):
     rows = []
 
-    # Chuẩn bị data insert
     for item in data.ratings:
+        level = get_level_from_rating(item.rating_level)
+
         rows.append({
             "user_id": data.user_id,
             "skills_name": item.skill_name,
             "rating_level": item.rating_level
         })
 
-    # Insert vào Supabase
     supabase.table("user_skills").insert(rows).execute()
 
-    # Tính average score
-    average_score = (
-        sum(item.rating_level for item in data.ratings)
-        / len(data.ratings)
-    )
+    summary = []
 
-    # Xác định level
-    if average_score <= 2:
-        level = "Beginner"
-    elif average_score <= 3.5:
-        level = "Intermediate"
-    else:
-        level = "Advanced"
+    for item in data.ratings:
+        summary.append({
+            "skill_name": item.skill_name,
+            "rating_level": item.rating_level,
+            "level": get_level_from_rating(item.rating_level)
+        })
 
     return {
         "message": "Skill assessment saved successfully",
         "summary": {
             "user_id": data.user_id,
-            "average_score": round(average_score, 2),
-            "level": level,
-            "ratings": rows
+            "ratings": summary
         }
     }
-
-
 # =========================
 # GET API
 # =========================
@@ -109,27 +110,37 @@ def get_skill_profile(user_id: str):
             "summary": None
         }
 
-    average_score = (
-        sum(item["rating_level"] for item in ratings)
-        / len(ratings)
-    )
+    summary = []
 
-    if average_score <= 2:
-        level = "Beginner"
-    elif average_score <= 3:
-        level = "Intermediate"
-    else:
-        level = "Advanced"
+    for item in ratings:
+        summary.append({
+            "skill_name": item["skills_name"],
+            "rating_level": item["rating_level"],
+            "level": get_level_from_rating(item["rating_level"])
+        })
 
     return {
         "message": "Skill profile fetched successfully",
         "summary": {
             "user_id": user_id,
-            "average_score": round(average_score, 2),
-            "level": level,
-            "ratings": ratings
+            "ratings": summary
         }
-    } # Đã thêm dấu ngoặc nhọn bị thiếu ở đây!
+    }
+
+@app.get("/api/skills")
+def get_skills():
+
+    result = (
+        supabase
+        .table("skills")
+        .select("*")
+        .execute()
+    )
+
+    return {
+        "message": "Skills fetched successfully",
+        "skills": result.data
+    }
 
 
 @app.get("/")
@@ -138,11 +149,24 @@ def read_root():
         "message": "Scrum AI Coach Backend is running"
     }
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
+def verify_token(authorization: str = Header(...)):
+    if authorization is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authorization token"
+        )
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token format"
+        )
+
+    token = authorization.replace("Bearer ", "")
 
     try:
         user = supabase.auth.get_user(token)
+
         return user.user
 
     except Exception:
