@@ -1,12 +1,14 @@
 import os
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends, Header
 from pydantic import BaseModel, EmailStr
 from typing import List
 from dotenv import load_dotenv
 from supabase import create_client
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 # Load biến môi trường
 load_dotenv()
+security = HTTPBearer()
 
 # Kết nối Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -38,14 +40,15 @@ class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
 
-
-# =========================
-# AUTH / REGISTRATION
-# =========================
-
+# Giữ cả RegisterRequest của bạn và LoginRequest của Triệu
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
 
 # =========================
 # POST API
@@ -91,6 +94,7 @@ def assess_skills(data: SkillAssessmentRequest):
     }
 
 
+# Code phần Đăng ký (Registration) của bạn
 @app.post("/api/auth/register")
 def register_user(data: RegisterRequest):
     try:
@@ -132,6 +136,33 @@ def register_user(data: RegisterRequest):
 
     except Exception as e:
         raise HTTPException(500, str(e))
+
+
+# Code phần Đăng nhập (Login) của Triệu
+@app.post("/api/auth/login")
+def login(data: LoginRequest):
+    try:
+        result = supabase.auth.sign_in_with_password({
+            "email": data.email,
+            "password": data.password
+        })
+
+        return {
+            "message": "Login successful",
+            "user": {
+                "id": result.user.id,
+                "email": result.user.email
+            },
+            "access_token": result.session.access_token,
+            "refresh_token": result.session.refresh_token,
+            "token_type": "bearer"
+        }
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
 
 
 # =========================
@@ -176,7 +207,7 @@ def get_skill_profile(user_id: str):
             "level": level,
             "ratings": ratings
         }
-    } # Đã thêm dấu ngoặc nhọn bị thiếu ở đây!
+    }
 
 
 @app.get("/")
@@ -185,6 +216,35 @@ def read_root():
         "message": "Scrum AI Coach Backend is running"
     }
 
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+
+    try:
+        user = supabase.auth.get_user(token)
+        return user.user
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+
+@app.get("/api/auth/me")
+def get_current_user(current_user = Depends(verify_token)):
+    return {
+        "message": "Token is valid",
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email
+        }
+    }
+
+
+# =========================
+# GOALS API
+# =========================
 
 @app.post("/api/goals/suggest")
 def suggest_goals(data: GoalSuggestRequest):
