@@ -4,10 +4,11 @@ from pydantic import BaseModel
 from typing import List
 from dotenv import load_dotenv
 from supabase import create_client
-
+from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 # Load biến môi trường
 load_dotenv()
-
+security = HTTPBearer()
 # Kết nối Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -37,6 +38,10 @@ class SkillRating(BaseModel):
 class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 # =========================
 # POST API
@@ -133,6 +138,28 @@ def read_root():
         "message": "Scrum AI Coach Backend is running"
     }
 
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+
+    try:
+        user = supabase.auth.get_user(token)
+        return user.user
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+@app.get("/api/auth/me")
+def get_current_user(current_user = Depends(verify_token)):
+    return {
+        "message": "Token is valid",
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email
+        }
+    }
+
 
 @app.post("/api/goals/suggest")
 def suggest_goals(data: GoalSuggestRequest):
@@ -170,3 +197,29 @@ def confirm_goal(data: GoalConfirmRequest):
         "message": "Goal saved to Supabase successfully",
         "saved_goal": saved_goal
     }
+
+@app.post("/api/auth/login")
+def login(data: LoginRequest):
+    try:
+        result = supabase.auth.sign_in_with_password({
+            "email": data.email,
+            "password": data.password
+        })
+
+        return {
+            "message": "Login successful",
+            "user": {
+                "id": result.user.id,
+                "email": result.user.email
+            },
+            "access_token": result.session.access_token,
+            "refresh_token": result.session.refresh_token,
+            "token_type": "bearer"
+        }
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+    
