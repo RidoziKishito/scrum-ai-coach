@@ -62,7 +62,7 @@ class GoalConfirmRequest(BaseModel):
     programming_tec: int = Field(..., ge=1, le=5)
     oop_score: int = Field(..., ge=1, le=5)
     sql_score: int = Field(..., ge=1, le=5)
-
+    validation_response: Optional[dict] = None
 
 def fallback_goals(skills: UserSkillProfile) -> List[dict]:
     weakest_score = min(
@@ -279,7 +279,8 @@ def save_goal_to_supabase(data: GoalConfirmRequest) -> dict:
         "feasibility": data.feasibility,
         "programming_technique_score": data.programming_tec,
         "oop_score": data.oop_score,
-        "sql_score": data.sql_score
+        "sql_score": data.sql_score,
+        "validation_response": data.validation_response
     }
 
     response = (
