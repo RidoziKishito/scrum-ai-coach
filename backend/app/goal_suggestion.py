@@ -240,36 +240,6 @@ def fallback_suggested_goals(user_skills: List[dict]) -> List[dict]:
                 "weekly_commitment_hours": 4,
                 "feasibility": "HIGH",
                 "reason": "This is a realistic starting point for a beginner learner."
-            },
-            {
-                "goal_title": "Practice Python basics through small exercises",
-                "goal_description": "Complete simple Python exercises covering input, output, control flow, functions, and lists.",
-                "goal_technique": "Python",
-                "target_skill_level": "Elementary",
-                "duration_weeks": 2,
-                "weekly_commitment_hours": 4,
-                "feasibility": "HIGH",
-                "reason": "Python is suitable for building early programming confidence."
-            },
-            {
-                "goal_title": "Learn basic Git workflow",
-                "goal_description": "Practice clone, branch, commit, push, pull, and pull request workflow.",
-                "goal_technique": "Version Control (Git)",
-                "target_skill_level": "Elementary",
-                "duration_weeks": 1,
-                "weekly_commitment_hours": 3,
-                "feasibility": "HIGH",
-                "reason": "Basic Git workflow can be learned quickly with practice."
-            },
-            {
-                "goal_title": "Create a small personal learning project",
-                "goal_description": "Build a simple project that combines basic programming, Git, and documentation.",
-                "goal_technique": "Programming Fundamentals",
-                "target_skill_level": "Intermediate",
-                "duration_weeks": 3,
-                "weekly_commitment_hours": 5,
-                "feasibility": "MEDIUM",
-                "reason": "This is achievable after practicing basic concepts."
             }
         ]
 
@@ -292,18 +262,6 @@ def fallback_suggested_goals(user_skills: List[dict]) -> List[dict]:
             "weekly_commitment_hours": 4,
             "feasibility": "HIGH" if skill["rating_level"] <= 2 else "MEDIUM",
             "reason": f"This goal focuses on improving a weaker skill area: {skill_name}."
-        })
-
-    while len(goals) < 4:
-        goals.append({
-            "goal_title": "Practice core software development skills",
-            "goal_description": "Complete small tasks that improve coding, debugging, and project organization.",
-            "goal_technique": "Programming Fundamentals",
-            "target_skill_level": "Intermediate",
-            "duration_weeks": 2,
-            "weekly_commitment_hours": 4,
-            "feasibility": "MEDIUM",
-            "reason": "This goal supports general improvement across technical skills."
         })
 
     return goals[:4]
@@ -330,24 +288,20 @@ def sanitize_goal_object(goal: dict, allow_impossible: bool = False) -> dict:
 def suggest_goals_by_ai(data: GoalSuggestRequest) -> List[dict]:
     user_skills = get_skill_context(data.user_id, data.skills)
     skills_text = format_skills_for_prompt(user_skills)
+    
+    # Lấy tên skill hiện tại làm mốc ép AI điền đúng kịch bản
+    target_skill_name = user_skills[0]["skills_name"] if user_skills else "Programming Fundamentals"
 
     prompt = f"""
 You are an AI learning coach for IT students.
 
-The user's assessed skills are:
+[CRITICAL DIRECTIVE] 
+You must ONLY generate learning goals specifically tailored for the technical topic listed under the "Assessed Skills" section. Do NOT invent roadmaps for other skills.
 
+The user's currently focused assessed skill is:
 {skills_text}
 
-Rating scale:
-1 - Beginner: New to the topic or only heard about it
-2 - Elementary: Understands basic concepts but still needs guidance
-3 - Intermediate: Can complete some tasks independently
-4 - Advanced: Performs well and can mentor others
-5 - Expert: Has deep knowledge and strong mastery
-
-Generate exactly 4 achievable learning goals.
-
-Each goal must be clear, realistic, and useful for the user's current skill level.
+Generate exactly 4 distinct, achievable learning goals for this topic.
 
 Return only valid JSON.
 Return exactly a JSON array with 4 objects.
@@ -362,26 +316,23 @@ Each object must have exactly these fields:
 - feasibility
 - reason
 
-Rules:
-- feasibility must be one of: HIGH, MEDIUM, LOW.
-- goal_technique should match one of these skill names when possible:
-{VALID_SKILLS}
-- duration_weeks must be a number.
-- weekly_commitment_hours must be a number.
-- Do not return markdown.
-- Do not explain outside JSON.
+[STRICT REWRITE RULES]
+1. The field `goal_technique` MUST be exactly: "{target_skill_name}". Do not change its phrasing or pick another skill.
+2. The `goal_title` and `goal_description` must strictly provide actionable learning milestones inside the domain of "{target_skill_name}".
+3. feasibility must be one of: HIGH, MEDIUM, LOW.
+4. duration_weeks and weekly_commitment_hours must be integers.
 
-Example:
+Template Abstract Structure Example (Do not copy these literal values, map them to your topic):
 [
   {{
-    "goal_title": "Master Python functions and data structures",
-    "goal_description": "Practice functions, lists, dictionaries, and simple problem solving tasks.",
-    "goal_technique": "Python",
+    "goal_title": "Core concepts and basic setup of [Topic Name]",
+    "goal_description": "Understand core mechanisms, perform basic implementation, and finish baseline practice lab tasks.",
+    "goal_technique": "{target_skill_name}",
     "target_skill_level": "Intermediate",
-    "duration_weeks": 3,
-    "weekly_commitment_hours": 5,
+    "duration_weeks": 2,
+    "weekly_commitment_hours": 4,
     "feasibility": "HIGH",
-    "reason": "The user has enough foundation to improve this skill with structured practice."
+    "reason": "Since the user is at an introductory phase, clear procedural tasks yield high feasibility."
   }}
 ]
 """
@@ -392,20 +343,20 @@ Example:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful AI learning coach. Return valid JSON only."
+                    "content": "You are a precise AI learning coach. You strictly output valid JSON and adhere perfectly to input technical parameters without bringing up legacy context."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.4
+            temperature=0.3 # Giảm nhiệt độ xuống để AI bớt "sáng tạo linh tinh"
         )
 
         content = response.choices[0].message.content
         goals = extract_json_from_text(content)
 
-        if isinstance(goals, list) and len(goals) >= 4:
+        if isinstance(goals, list) and len(goals) >= 1:
             return [
                 sanitize_goal_object(goal, allow_impossible=False)
                 for goal in goals[:4]
@@ -426,37 +377,30 @@ def validate_goal_by_ai(data: GoalValidateRequest) -> dict:
 You are an AI learning coach for IT students.
 
 The user's assessed skills are:
-
 {skills_text}
 
-Selected goal:
-{data.goal_title}
+Selected goal: {data.goal_title}
+Goal technique: {data.goal_technique}
 
-Goal technique:
-{data.goal_technique}
-
-Validate whether this selected goal is achievable for the user.
+Validate whether this selected goal is achievable for the user based strictly on their assessment score.
 
 Return only valid JSON with this structure:
 {{
   "goal_title": "selected goal",
   "goal_description": "short description of the selected goal",
-  "goal_technique": "selected skill or technique",
+  "goal_technique": "{data.goal_technique}",
   "target_skill_level": "target level",
   "duration_weeks": 2,
   "weekly_commitment_hours": 4,
   "feasibility": "HIGH | MEDIUM | LOW",
-  "reason": "short reason",
+  "reason": "short analytical reason why",
   "alternative_goals": []
 }}
 
 Rules:
 - feasibility must be only HIGH, MEDIUM, or LOW.
 - If feasibility is LOW, alternative_goals must contain at least 2 easier goals.
-- Each alternative goal must contain goal_title, goal_description, goal_technique, target_skill_level, duration_weeks, weekly_commitment_hours, feasibility, and reason.
-- If feasibility is HIGH or MEDIUM, alternative_goals can be empty.
 - Do not return markdown.
-- Do not explain outside JSON.
 """
 
     try:
@@ -472,48 +416,16 @@ Rules:
                     "content": prompt
                 }
             ],
-            temperature=0.3
+            temperature=0.2
         )
 
         content = response.choices[0].message.content
         result = extract_json_from_text(content)
-
-        result["feasibility"] = normalize_feasibility(
-            str(result.get("feasibility", "MEDIUM"))
-        )
-
-        if result["feasibility"] == "LOW":
-            alternatives = result.get("alternative_goals", [])
-
-            if len(alternatives) < 2:
-                result["alternative_goals"] = [
-                    {
-                        "goal_title": f"Start with a basic task in {data.goal_technique}",
-                        "goal_description": "Complete one beginner-friendly guided task before moving to a larger goal.",
-                        "goal_technique": data.goal_technique,
-                        "target_skill_level": "Elementary",
-                        "duration_weeks": 1,
-                        "weekly_commitment_hours": 3,
-                        "feasibility": "HIGH",
-                        "reason": "This is a simpler starting point for the current skill level."
-                    },
-                    {
-                        "goal_title": f"Complete a small practice exercise in {data.goal_technique}",
-                        "goal_description": "Practice the core concept with a small and measurable exercise.",
-                        "goal_technique": data.goal_technique,
-                        "target_skill_level": "Elementary",
-                        "duration_weeks": 1,
-                        "weekly_commitment_hours": 3,
-                        "feasibility": "HIGH",
-                        "reason": "This reduces complexity and improves the chance of success."
-                    }
-                ]
-
+        result["feasibility"] = normalize_feasibility(str(result.get("feasibility", "MEDIUM")))
         return result
 
     except Exception as e:
         print("Groq validate error:", e)
-
         return {
             "goal_title": data.goal_title,
             "goal_description": "The selected goal could not be fully validated because the AI service is unavailable.",
@@ -522,7 +434,7 @@ Rules:
             "duration_weeks": 2,
             "weekly_commitment_hours": 4,
             "feasibility": "MEDIUM",
-            "reason": "The AI validation service is unavailable, so this goal is marked as MEDIUM by default.",
+            "reason": "AI validation service timeout fallback.",
             "alternative_goals": []
         }
 
@@ -535,36 +447,34 @@ def refine_custom_goal_by_ai(data: GoalCustomRefineRequest) -> dict:
     prompt = f"""
 You are an AI learning coach for IT students.
 
-The user's assessed skills are:
-
+The user's assessed skill context is:
 {skills_text}
 
 Custom goal written by the user:
-{data.custom_goal}
+"{data.custom_goal}"
 
-Preferred goal technique:
-{goal_technique}
+Preferred target technique: "{goal_technique}"
 
-Rewrite this custom goal into exactly one clear, structured, and measurable learning goal.
+Rewrite this custom goal into exactly one clear, structured, and manageable learning milestone.
+If the custom goal is hyper-unrealistic (e.g. mastering complex skills in one day, or becoming a senior expert instantly from beginner level), you must explicitly flag it as IMPOSSIBLE.
 
 Return only valid JSON with this structure:
 {{
-  "goal_title": "rewritten clear goal",
+  "goal_title": "rewritten clear specific goal aligning with {goal_technique}",
   "goal_description": "specific explanation of what the user should achieve",
-  "goal_technique": "related skill or technique",
+  "goal_technique": "{goal_technique}",
   "target_skill_level": "target level",
-  "duration_weeks": 2,
-  "weekly_commitment_hours": 4,
+  "duration_weeks": 4,
+  "weekly_commitment_hours": 6,
   "feasibility": "HIGH | MEDIUM | LOW | IMPOSSIBLE",
-  "reason": "short reason"
+  "reason": "short evaluation of the goal's scale relative to the user's current timeline and status"
 }}
 
 Rules:
-- Return exactly one JSON object.
+- The field `goal_technique` MUST be exactly: "{goal_technique}".
 - feasibility must be one of: HIGH, MEDIUM, LOW, IMPOSSIBLE.
-- Use IMPOSSIBLE only if the goal is unrealistic for the user's current skills, time, or scope.
-- Do not return markdown.
-- Do not explain outside JSON.
+- Use IMPOSSIBLE if and only if the request scale completely violates human learning capabilities or timeframe constraints.
+- Do not wrap in markdown or blockquotes.
 """
 
     try:
@@ -573,14 +483,14 @@ Rules:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful AI learning coach. Return valid JSON only."
+                    "content": "You are a rigid parsing AI assistant. You output single valid JSON objects without wrapping them in markdown tags."
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.3
+            temperature=0.1
         )
 
         content = response.choices[0].message.content
@@ -614,18 +524,16 @@ Rules:
 
     except Exception as e:
         print("Groq custom goal refine error:", e)
-
         fallback_goal = {
             "goal_title": data.custom_goal,
-            "goal_description": "The custom goal could not be refined because the AI service is unavailable.",
+            "goal_description": "The custom goal could not be processed due to connectivity issues.",
             "goal_technique": goal_technique,
             "target_skill_level": "Intermediate",
             "duration_weeks": 2,
             "weekly_commitment_hours": 4,
             "feasibility": "MEDIUM",
-            "reason": "The AI service is unavailable, so this goal is returned with a default feasibility level."
+            "reason": "AI engine timeout fallback."
         }
-
         return {
             "message": "Custom goal refinement fallback returned",
             "status": "FALLBACK",
@@ -633,7 +541,7 @@ Rules:
             "notification": {
                 "type": "info",
                 "title": "AI refinement unavailable",
-                "message": "The AI service is currently unavailable, so the original custom goal was returned with default planning information."
+                "message": "System defaulted parameters due to service interruption."
             },
             "goal": fallback_goal
         }

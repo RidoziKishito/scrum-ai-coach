@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import assessmentApi from '../services/assessmentApi';
+import GoalSelection from './GoalSelection';
 import './SkillAssessment.css';
 
 const RATING_LEGEND = [
@@ -16,7 +17,6 @@ export default function SkillAssessment() {
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [selectedLevel, setSelectedLevel] = useState(null);
 
-  // 1. Fetch data từ Backend thật
   useEffect(() => {
     assessmentApi.getSkills()
       .then(data => {
@@ -27,20 +27,18 @@ export default function SkillAssessment() {
       .catch(err => console.error("Error loading skills:", err));
   }, []);
 
-  // 2. Hàm reset state (Hàm này đang bị thiếu gây ra lỗi của bạn)
   const handleReselect = () => {
     setSelectedCourse(null);
     setSelectedLevel(null);
     setView('LIST');
   };
 
-  // 3. Hàm submit data về Backend
   const handleSubmitToBackend = async () => {
     if (!selectedLevel) return;
     setView('GENERATING'); 
 
     const payload = {
-      user_id: "test-user-id-123", // Dùng tạm ID để test
+      user_id: "test-user-id-123", 
       ratings: [
         {
           skill_name: selectedCourse.name,
@@ -64,23 +62,20 @@ export default function SkillAssessment() {
     </div>
   );
 
-  // ================= VIEW 5: RESULT =================
+  // ================= VIEW 5: RESULT (GOAL SELECTION SUITE) =================
   if (view === 'RESULT') {
     return (
-      <div className="mobile-container">
-        <div className="glass-card text-center slide-up">
-          <div className="success-icon">✨</div>
-          <h2 className="title">Analysis Complete</h2>
-          <p className="subtitle">Your personalized learning path for <strong>{selectedCourse.name}</strong> is ready.</p>
-          <div className="bottom-action-bar" style={{ marginTop: '30px' }}>
-            <button className="btn btn-primary" onClick={handleReselect}>Explore more skills</button>
-          </div>
-        </div>
-      </div>
+      <GoalSelection 
+        userId="test-user-id-123"
+        userName="Trực"
+        skillName={selectedCourse.name}
+        ratingLevel={selectedLevel}
+        onResetFlow={handleReselect} // Khi nhấn nút hoàn tất, reset flow về màn hình LIST ban đầu
+      />
     );
   }
 
-  // ================= VIEW 4: LOADING AI =================
+  // ================= VIEW 4: LOADING =================
   if (view === 'GENERATING') {
     return (
       <div className="mobile-container">

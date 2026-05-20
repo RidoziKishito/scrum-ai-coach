@@ -2,10 +2,10 @@ import os
 from fastapi import FastAPI, HTTPException, status, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
-from typing import List
+from typing import List, Optional
 from dotenv import load_dotenv
 from supabase import create_client
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 
 # Load biến môi trường
 load_dotenv()
@@ -17,36 +17,34 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Import từ main
+# Import AI modules từ goal_suggestion.py
 from app.goal_suggestion import (
     GoalSuggestRequest,
     GoalValidateRequest,
-    GoalCustomRefineRequest,
     GoalConfirmRequest,
+    GoalCustomRefineRequest,
     suggest_goals_by_ai,
     validate_goal_by_ai,
-    refine_custom_goal_by_ai,
-    save_goal_to_supabase
+    save_goal_to_supabase,
+    refine_custom_goal_by_ai
 )
 
 app = FastAPI()
 
-
 # =========================
-# CẤU HÌNH CORS (MỚI THÊM)
+# CẤU HÌNH CORS
 # =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # Port mặc định của Vite React
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =========================
-# MODELS
+# MODELS CƠ BẢN
 # =========================
-
 class SkillRating(BaseModel):
     skill_name: str
     rating_level: int
@@ -55,18 +53,8 @@ class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
 
-# Giữ cả RegisterRequest của bạn và LoginRequest của Triệu
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
 # =========================
-# POST API
+# UTILS
 # =========================
 def get_level_from_rating(rating_level: int):
     level_mapping = {
@@ -76,147 +64,87 @@ def get_level_from_rating(rating_level: int):
         4: "Advanced",
         5: "Expert"
     }
-
     return level_mapping.get(rating_level, "Unknown")
 
-@app.post("/api/skills/assess")
-def assess_skills(data: SkillAssessmentRequest):
-    rows = []
-
-    for item in data.ratings:
-        level = get_level_from_rating(item.rating_level)
-
-        rows.append({
-            "user_id": data.user_id,
-            "skills_name": item.skill_name,
-            "rating_level": item.rating_level
-        })
-
-    supabase.table("user_skills").insert(rows).execute()
-
-    summary = []
-
-    for item in data.ratings:
-        summary.append({
-            "skill_name": item.skill_name,
-            "rating_level": item.rating_level,
-            "level": get_level_from_rating(item.rating_level)
-        })
-
-    return {
-        "message": "Skill assessment saved successfully",
-        "summary": {
-            "user_id": data.user_id,
-            "ratings": summary
-        }
-    }
-# =========================
-# GET API
-# =========================
-
-@app.get("/api/skills/profile")
-def get_skill_profile(user_id: str):
-    result = (
-        supabase
-        .table("user_skills")
-        .select("*")
-        .eq("user_id", user_id)
-        .execute()
-    )
-
-    ratings = result.data
-
-    if not ratings:
-        return {
-            "message": "No profile found",
-            "summary": None
-        }
-
-    summary = []
-
-    for item in ratings:
-        summary.append({
-            "skill_name": item["skills_name"],
-            "rating_level": item["rating_level"],
-            "level": get_level_from_rating(item["rating_level"])
-        })
-
-    return {
-        "message": "Skill profile fetched successfully",
-        "summary": {
-            "user_id": user_id,
-            "ratings": summary
-        }
-    }
-
-@app.get("/api/skills")
-def get_skills():
-
-    result = (
-        supabase
-        .table("skills")
-        .select("*")
-        .execute()
-    )
-
-    return {
-        "message": "Skills fetched successfully",
-        "skills": result.data
-    }
-
-
-@app.get("/")
-def read_root():
-    return {
-        "message": "Scrum AI Coach Backend is running"
-    }
-
 def verify_token(authorization: str = Header(...)):
-    if authorization is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authorization token"
-        )
-
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token format"
-        )
-
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid token format")
     token = authorization.replace("Bearer ", "")
-
     try:
         user = supabase.auth.get_user(token)
-
         return user.user
-
     except Exception:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token"
-        )
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+# =========================
+# API: ROOT & AUTH
+# =========================
+@app.get("/")
+def read_root():
+    return {"message": "Scrum AI Coach Backend is running"}
 
 @app.get("/api/auth/me")
 def get_current_user(current_user = Depends(verify_token)):
     return {
         "message": "Token is valid",
-        "user": {
-            "id": current_user.id,
-            "email": current_user.email
-        }
+        "user": {"id": current_user.id, "email": current_user.email}
     }
 
+# =========================
+# API: SKILLS
+# =========================
+@app.get("/api/skills")
+def get_skills():
+    result = supabase.table("skills").select("*").execute()
+    return {
+        "message": "Skills fetched successfully",
+        "skills": result.data
+    }
+
+@app.get("/api/skills/profile")
+def get_skill_profile(user_id: str):
+    result = supabase.table("user_skills").select("*").eq("user_id", user_id).execute()
+    if not result.data:
+        return {"message": "No profile found", "summary": None}
+    
+    summary = [{
+        "skill_name": item["skills_name"],
+        "rating_level": item["rating_level"],
+        "level": get_level_from_rating(item["rating_level"])
+    } for item in result.data]
+
+    return {
+        "message": "Skill profile fetched successfully",
+        "summary": {"user_id": user_id, "ratings": summary}
+    }
+
+@app.post("/api/skills/assess")
+def assess_skills(data: SkillAssessmentRequest):
+    rows = [{
+        "user_id": data.user_id,
+        "skills_name": item.skill_name,
+        "rating_level": item.rating_level
+    } for item in data.ratings]
+
+    supabase.table("user_skills").insert(rows).execute()
+
+    summary = [{
+        "skill_name": item.skill_name,
+        "rating_level": item.rating_level,
+        "level": get_level_from_rating(item.rating_level)
+    } for item in data.ratings]
+
+    return {
+        "message": "Skill assessment saved successfully",
+        "summary": {"user_id": data.user_id, "ratings": summary}
+    }
 
 # =========================
-# GOALS API
+# API: GOALS (AI TÍCH HỢP)
 # =========================
-
 @app.post("/api/goals/suggest")
 def suggest_goals(data: GoalSuggestRequest):
     goals = suggest_goals_by_ai(data)
-
     return {
         "message": "Goal suggestions generated successfully",
         "user_id": data.user_id,
@@ -224,11 +152,14 @@ def suggest_goals(data: GoalSuggestRequest):
         "goals": goals
     }
 
+@app.post("/api/goals/custom/refine")
+def refine_custom_goal(data: GoalCustomRefineRequest):
+    result = refine_custom_goal_by_ai(data)
+    return result
 
 @app.post("/api/goals/validate")
 def validate_goal(data: GoalValidateRequest):
     result = validate_goal_by_ai(data)
-
     return {
         "message": "Goal validation completed",
         "user_id": data.user_id,
@@ -236,18 +167,9 @@ def validate_goal(data: GoalValidateRequest):
         "result": result
     }
 
-
-@app.post("/api/goals/custom/refine")
-def refine_custom_goal(data: GoalCustomRefineRequest):
-    result = refine_custom_goal_by_ai(data)
-
-    return result
-
-
 @app.post("/api/goals/confirm")
 def confirm_goal(data: GoalConfirmRequest):
     saved_goal = save_goal_to_supabase(data)
-
     return {
         "message": "Goal saved to Supabase successfully",
         "saved_goal": saved_goal
