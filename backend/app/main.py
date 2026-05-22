@@ -1,5 +1,7 @@
 import os
+import uuid
 from fastapi import FastAPI, HTTPException, status, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr
 from typing import List
 from dotenv import load_dotenv
@@ -13,11 +15,13 @@ security = HTTPBearer()
 # Kết nối Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+DEV_AUTH_BYPASS = os.getenv("DEV_AUTH_BYPASS", "false").lower() == "true"
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+DEV_REGISTERED_EMAILS = set()
 
 # Import từ main
-from app.goal_suggestion import (
+from .goal_suggestion import (
     GoalSuggestRequest,
     GoalValidateRequest,
     GoalConfirmRequest,
@@ -27,6 +31,17 @@ from app.goal_suggestion import (
 )
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
 
 # =========================
 # MODELS
@@ -50,6 +65,39 @@ class LoginRequest(BaseModel):
     password: str
 
 
+def map_register_error(error: Exception) -> HTTPException:
+    status_code = getattr(error, "status", None) or getattr(error, "status_code", None)
+    raw_message = (
+        getattr(error, "message", None)
+        or getattr(error, "detail", None)
+        or str(error)
+    )
+    message = raw_message.lower()
+
+    if status_code == 429 or "rate limit" in message:
+        return HTTPException(
+            status_code=429,
+            detail="Too many registration attempts. Please try again later."
+        )
+
+    if (
+        status_code == 409
+        or "already registered" in message
+        or "already been registered" in message
+        or "user already registered" in message
+        or "already in use" in message
+    ):
+        return HTTPException(
+            status_code=409,
+            detail="Email already in use"
+        )
+
+    return HTTPException(
+        status_code=500,
+        detail=raw_message or "Registration failed"
+    )
+
+
 # =========================
 # POST API
 # =========================
@@ -63,6 +111,57 @@ def get_level_from_rating(rating_level: int):
     }
 
     return level_mapping.get(rating_level, "Unknown")
+
+
+@app.post("/api/auth/register")
+def register_user(data: RegisterRequest):
+    try:
+        email = str(data.email).strip()
+        password = data.password.strip()
+
+        if len(password) < 6:
+            raise HTTPException(400, "Password must be at least 6 characters")
+
+        if DEV_AUTH_BYPASS:
+            if email.lower() in DEV_REGISTERED_EMAILS:
+                raise HTTPException(409, "Email already in use")
+
+            DEV_REGISTERED_EMAILS.add(email.lower())
+
+            return {
+                "message": "User registered successfully (dev bypass)",
+                "user_id": f"dev-{uuid.uuid4()}",
+                "email": email
+            }
+
+        response = supabase.auth.sign_up({
+            "email": email,
+            "password": password
+        })
+
+        user = response.user
+
+        if not user:
+            raise HTTPException(400, "Registration failed")
+
+        try:
+            supabase.table("accounts").insert({
+                "auth_uid": user.id,
+                "email": email
+            }).execute()
+        except Exception as error:
+            print("Insert accounts error:", error)
+
+        return {
+            "message": "User registered successfully",
+            "user_id": user.id,
+            "email": email
+        }
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise map_register_error(error)
 
 @app.post("/api/skills/assess")
 def assess_skills(data: SkillAssessmentRequest):

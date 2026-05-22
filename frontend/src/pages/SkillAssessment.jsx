@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import assessmentApi from '../services/assessmentApi';
+// import RegisterPage from './RegisterPage';
 import './SkillAssessment.css';
 
 const RATING_LEGEND = [
@@ -11,6 +12,7 @@ const RATING_LEGEND = [
 ];
 
 export default function SkillAssessment() {
+  //const [isRegistered, setIsRegistered] = useState(false);
   const [courses, setCourses] = useState([]);
   const [view, setView] = useState('LIST'); 
   const [selectedCourse, setSelectedCourse] = useState(null);
@@ -46,6 +48,10 @@ export default function SkillAssessment() {
       setView('REVIEW');
     }
   };
+
+  // if (!isRegistered) {
+  //   return <RegisterPage onSuccess={() => setIsRegistered(true)} />;
+  // }
 
   // Helper render thanh tiến trình
   const renderProgress = (progress) => (
