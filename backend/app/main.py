@@ -2,35 +2,39 @@ import os
 import uuid
 from fastapi import FastAPI, HTTPException, status, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import List
 from dotenv import load_dotenv
 from supabase import create_client
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-
-# Load biến môi trường
-load_dotenv()
-security = HTTPBearer()
-
-# Kết nối Supabase
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-DEV_AUTH_BYPASS = os.getenv("DEV_AUTH_BYPASS", "false").lower() == "true"
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-DEV_REGISTERED_EMAILS = set()
-
-# Import từ main
-from .goal_suggestion import (
+from app.goal_suggestion import (
     GoalSuggestRequest,
     GoalValidateRequest,
+    GoalCustomRefineRequest,
     GoalConfirmRequest,
     suggest_goals_by_ai,
     validate_goal_by_ai,
-    save_goal_to_supabase
+    refine_custom_goal_by_ai,
+    save_goal_to_supabase,
 )
 
+# =========================
+# CONFIG
+# =========================
+
+load_dotenv()
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("Missing SUPABASE_URL or SUPABASE_KEY in .env file")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
 app = FastAPI()
+security = HTTPBearer()
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -51,14 +55,16 @@ class SkillRating(BaseModel):
     skill_name: str
     rating_level: int
 
+
 class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
 
-# Giữ cả RegisterRequest của bạn và LoginRequest của Triệu
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
+
 
 class LoginRequest(BaseModel):
     email: str
@@ -99,19 +105,51 @@ def map_register_error(error: Exception) -> HTTPException:
 
 
 # =========================
-# POST API
+# HELPER FUNCTIONS
 # =========================
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+
+    try:
+        user = supabase.auth.get_user(token)
+        return user.user
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token"
+        )
+
+
 def get_level_from_rating(rating_level: int):
     level_mapping = {
         1: "Beginner",
         2: "Elementary",
         3: "Intermediate",
         4: "Advanced",
-        5: "Expert"
+        5: "Expert",
     }
 
     return level_mapping.get(rating_level, "Unknown")
 
+
+# =========================
+# ROOT API
+# =========================
+
+@app.get("/")
+def read_root():
+    return {
+        "message": "Scrum AI Coach Backend is running"
+    }
+
+    return level_mapping.get(rating_level, "Unknown")
+
+
+# =========================
+# AUTHENTICATION API
+# =========================
 
 @app.post("/api/auth/register")
 def register_user(data: RegisterRequest):
@@ -120,19 +158,10 @@ def register_user(data: RegisterRequest):
         password = data.password.strip()
 
         if len(password) < 6:
-            raise HTTPException(400, "Password must be at least 6 characters")
-
-        if DEV_AUTH_BYPASS:
-            if email.lower() in DEV_REGISTERED_EMAILS:
-                raise HTTPException(409, "Email already in use")
-
-            DEV_REGISTERED_EMAILS.add(email.lower())
-
-            return {
-                "message": "User registered successfully (dev bypass)",
-                "user_id": f"dev-{uuid.uuid4()}",
-                "email": email
-            }
+            raise HTTPException(
+                status_code=400,
+                detail="Password must be at least 6 characters"
+            )
 
         response = supabase.auth.sign_up({
             "email": email,
@@ -142,15 +171,19 @@ def register_user(data: RegisterRequest):
         user = response.user
 
         if not user:
-            raise HTTPException(400, "Registration failed")
+            raise HTTPException(
+                status_code=400,
+                detail="Registration failed"
+            )
 
         try:
             supabase.table("accounts").insert({
                 "auth_uid": user.id,
                 "email": email
             }).execute()
-        except Exception as error:
-            print("Insert accounts error:", error)
+
+        except Exception as e:
+            print("Insert accounts error:", e)
 
         return {
             "message": "User registered successfully",
@@ -160,8 +193,12 @@ def register_user(data: RegisterRequest):
 
     except HTTPException:
         raise
-    except Exception as error:
-        raise map_register_error(error)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
 
 @app.post("/api/skills/assess")
 def assess_skills(data: SkillAssessmentRequest):
@@ -176,30 +213,98 @@ def assess_skills(data: SkillAssessmentRequest):
             "rating_level": item.rating_level
         })
 
-    supabase.table("user_skills").insert(rows).execute()
+@app.post("/api/auth/login")
+def login(data: LoginRequest):
+    try:
+        result = supabase.auth.sign_in_with_password({
+            "email": data.email,
+            "password": data.password
+        })
 
-    summary = []
+        return {
+            "message": "Login successful",
+            "user": {
+                "id": result.user.id,
+                "email": result.user.email
+            },
+            "access_token": result.session.access_token,
+            "refresh_token": result.session.refresh_token,
+            "token_type": "bearer"
+        }
+
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email or password"
+        )
+
+@app.get("/api/auth/me")
+def get_current_user(current_user=Depends(verify_token)):
+    return {
+        "message": "Token is valid",
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email
+        }
+    }
+
+
+# =========================
+# SKILLS API
+# =========================
+
+@app.get("/api/skills")
+def get_skills():
+    result = (
+        supabase
+        .table("skills")
+        .select("*")
+        .execute()
+    )
+
+    return {
+        "message": "Skills fetched successfully",
+        "skills": result.data
+    }
+
+
+@app.post("/api/skills/assess")
+def assess_skills(
+    data: SkillAssessmentRequest,
+    current_user=Depends(verify_token)
+):
+    rows = []
+    summary_ratings = []
 
     for item in data.ratings:
-        summary.append({
+        rows.append({
+            "user_id": data.user_id,
+            "skills_name": item.skill_name,
+            "rating_level": item.rating_level
+        })
+
+        summary_ratings.append({
             "skill_name": item.skill_name,
             "rating_level": item.rating_level,
             "level": get_level_from_rating(item.rating_level)
         })
 
+    supabase.table("user_skills").insert(rows).execute()
+
     return {
         "message": "Skill assessment saved successfully",
         "summary": {
             "user_id": data.user_id,
-            "ratings": summary
+            "ratings": summary_ratings
         }
     }
-# =========================
-# GET API
-# =========================
+
 
 @app.get("/api/skills/profile")
-def get_skill_profile(user_id: str):
+def get_skill_profile(
+    user_id: str,
+    current_user=Depends(verify_token)
+):
     result = (
         supabase
         .table("user_skills")
@@ -216,10 +321,10 @@ def get_skill_profile(user_id: str):
             "summary": None
         }
 
-    summary = []
+    summary_ratings = []
 
     for item in ratings:
-        summary.append({
+        summary_ratings.append({
             "skill_name": item["skills_name"],
             "rating_level": item["rating_level"],
             "level": get_level_from_rating(item["rating_level"])
@@ -229,7 +334,7 @@ def get_skill_profile(user_id: str):
         "message": "Skill profile fetched successfully",
         "summary": {
             "user_id": user_id,
-            "ratings": summary
+            "ratings": summary_ratings
         }
     }
 
@@ -323,6 +428,12 @@ def validate_goal(data: GoalValidateRequest):
         "name": data.name,
         "result": result
     }
+
+
+@app.post("/api/goals/custom/refine")
+def refine_custom_goal(data: GoalCustomRefineRequest):
+    result = refine_custom_goal_by_ai(data)
+    return result
 
 
 @app.post("/api/goals/confirm")
