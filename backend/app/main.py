@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, HTTPException, Depends
+import uuid
+from fastapi import FastAPI, HTTPException, status, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -62,21 +63,17 @@ class SkillRating(BaseModel):
     skill_name: str
     rating_level: int
 
-
 class SkillAssessmentRequest(BaseModel):
     user_id: str
     ratings: List[SkillRating]
-
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
 
-
 class LoginRequest(BaseModel):
     email: str
     password: str
-
 
 # =========================
 # HELPER FUNCTIONS
@@ -93,7 +90,6 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             detail="Invalid or expired token"
         )
 
-
 def get_level_from_rating(rating_level: int):
     level_mapping = {
         1: "Beginner",
@@ -104,7 +100,6 @@ def get_level_from_rating(rating_level: int):
     }
     return level_mapping.get(rating_level, "Unknown")
 
-
 # =========================
 # ROOT API
 # =========================
@@ -114,7 +109,6 @@ def read_root():
     return {
         "message": "Scrum AI Coach Backend is running"
     }
-
 
 # =========================
 # AUTHENTICATION API
@@ -150,7 +144,6 @@ def register_user(data: RegisterRequest):
                 "auth_uid": user.id,
                 "email": email
             }).execute()
-
         except Exception as e:
             print("Insert accounts error:", e)
 
@@ -167,7 +160,6 @@ def register_user(data: RegisterRequest):
             status_code=500,
             detail=str(e)
         )
-
 
 @app.post("/api/auth/login")
 def login(data: LoginRequest):
@@ -194,7 +186,6 @@ def login(data: LoginRequest):
             detail="Invalid email or password"
         )
 
-
 @app.get("/api/auth/me")
 def get_current_user(current_user=Depends(verify_token)):
     return {
@@ -204,7 +195,6 @@ def get_current_user(current_user=Depends(verify_token)):
             "email": current_user.email
         }
     }
-
 
 # =========================
 # SKILLS API
@@ -223,7 +213,6 @@ def get_skills():
         "message": "Skills fetched successfully",
         "skills": result.data
     }
-
 
 @app.post("/api/skills/assess")
 def assess_skills(
@@ -255,7 +244,6 @@ def assess_skills(
             "ratings": summary_ratings
         }
     }
-
 
 @app.get("/api/skills/profile")
 def get_skill_profile(
@@ -295,7 +283,6 @@ def get_skill_profile(
         }
     }
 
-
 # =========================
 # GOALS API
 # =========================
@@ -310,7 +297,6 @@ def suggest_goals(data: GoalSuggestRequest):
         "name": data.name,
         "goals": goals
     }
-
 
 @app.post("/api/goals/validate")
 def validate_goal(data: GoalValidateRequest):
@@ -327,12 +313,10 @@ def validate_goal(data: GoalValidateRequest):
         "result": result
     }
 
-
 @app.post("/api/goals/custom/refine")
 def refine_custom_goal(data: GoalCustomRefineRequest):
     result = refine_custom_goal_by_ai(data)
     return result
-
 
 @app.post("/api/goals/confirm")
 def confirm_goal(data: GoalConfirmRequest):
@@ -361,7 +345,6 @@ def generate_action_plan(data: ActionGenerateRequest):
         "goal_id": data.goal_id,
         "steps": saved_steps
     }
-
 
 @app.put("/api/actions/{step_id}/status")
 def update_action_status(step_id: int, data: ActionStepStatusRequest):
