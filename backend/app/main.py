@@ -71,39 +71,6 @@ class LoginRequest(BaseModel):
     password: str
 
 
-def map_register_error(error: Exception) -> HTTPException:
-    status_code = getattr(error, "status", None) or getattr(error, "status_code", None)
-    raw_message = (
-        getattr(error, "message", None)
-        or getattr(error, "detail", None)
-        or str(error)
-    )
-    message = raw_message.lower()
-
-    if status_code == 429 or "rate limit" in message:
-        return HTTPException(
-            status_code=429,
-            detail="Too many registration attempts. Please try again later."
-        )
-
-    if (
-        status_code == 409
-        or "already registered" in message
-        or "already been registered" in message
-        or "user already registered" in message
-        or "already in use" in message
-    ):
-        return HTTPException(
-            status_code=409,
-            detail="Email already in use"
-        )
-
-    return HTTPException(
-        status_code=500,
-        detail=raw_message or "Registration failed"
-    )
-
-
 # =========================
 # HELPER FUNCTIONS
 # =========================
