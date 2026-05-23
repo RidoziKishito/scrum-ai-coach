@@ -1,5 +1,6 @@
 import os
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import List
@@ -15,6 +16,14 @@ from app.goal_suggestion import (
     validate_goal_by_ai,
     refine_custom_goal_by_ai,
     save_goal_to_supabase,
+)
+
+from app.action_plan import (
+    ActionGenerateRequest,
+    ActionStepStatusRequest,
+    generate_action_steps_by_ai,
+    save_action_steps_to_supabase,
+    update_action_step_status
 )
 
 # =========================
@@ -34,6 +43,16 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 app = FastAPI()
 security = HTTPBearer()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =========================
 # MODELS
@@ -65,11 +84,9 @@ class LoginRequest(BaseModel):
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
-
     try:
         user = supabase.auth.get_user(token)
         return user.user
-
     except Exception:
         raise HTTPException(
             status_code=401,
@@ -85,7 +102,6 @@ def get_level_from_rating(rating_level: int):
         4: "Advanced",
         5: "Expert",
     }
-
     return level_mapping.get(rating_level, "Unknown")
 
 
@@ -146,7 +162,6 @@ def register_user(data: RegisterRequest):
 
     except HTTPException:
         raise
-
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -326,4 +341,36 @@ def confirm_goal(data: GoalConfirmRequest):
     return {
         "message": "Goal saved to Supabase successfully",
         "saved_goal": saved_goal
+    }
+
+# =========================
+# ACTIONS API
+# =========================
+
+@app.post("/api/actions/generate")
+def generate_action_plan(data: ActionGenerateRequest):
+    steps = generate_action_steps_by_ai(data)
+
+    saved_steps = save_action_steps_to_supabase(
+        goal_id=data.goal_id,
+        steps=steps
+    )
+
+    return {
+        "message": "SMART action plan generated and saved successfully",
+        "goal_id": data.goal_id,
+        "steps": saved_steps
+    }
+
+
+@app.put("/api/actions/{step_id}/status")
+def update_action_status(step_id: int, data: ActionStepStatusRequest):
+    updated_step = update_action_step_status(
+        step_id=step_id,
+        is_completed=data.is_completed
+    )
+
+    return {
+        "message": "Action step status updated successfully",
+        "step": updated_step
     }
