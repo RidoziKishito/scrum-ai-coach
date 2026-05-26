@@ -1,18 +1,126 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
+
 import Layout from "./components/Layout";
+import RequireAuth from "./components/RequireAuth";
+import RequireRole from "./components/RequireRole";
+
+import Welcome from "./pages/Welcome";
+import Login from "./pages/Login";
 import RegisterPage from "./pages/RegisterPage";
+import Onboarding from "./pages/Onboarding";
+
 import SkillAssessment from "./pages/SkillAssessment";
+import SkillProfile from "./pages/SkillProfile";
+import ActionPlan from "./pages/ActionPlan";
+
+import Dashboard from "./pages/Dashboard";
+import ProgressDashboard from "./pages/ProgressDashboard";
+import Feedback from "./pages/Feedback";
+import Settings from "./pages/Settings";
+import ErrorPage from "./pages/ErrorPage";
+
+function HomeRedirect() {
+  // Đã chuẩn hóa: Chỉ sử dụng access_token theo thiết kế mới
+  const token = localStorage.getItem("access_token");
+  return <Navigate to={token ? "/dashboard" : "/welcome"} replace />;
+}
 
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route
-          path="/register"
-          element={<RegisterPage onSuccess={() => window.location.assign("/")} />}
-        />
-        <Route path="/" element={<Layout><SkillAssessment /></Layout>} />
-      </Routes>
+      <Layout>
+        <Routes>
+
+          {/* Public Routes */}
+          <Route path="/welcome" element={<Welcome />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/unauthorized" element={<ErrorPage type="unauthorized" />} />
+          <Route path="/forbidden" element={<ErrorPage type="forbidden" />} />
+
+          {/* Protected Routes */}
+          <Route path="/" element={<HomeRedirect />} />
+
+          <Route
+            path="/skills"
+            element={
+              <RequireAuth>
+                <RequireRole>
+                  <SkillAssessment />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/skill-profile"
+            element={
+              <RequireAuth>
+                <SkillProfile />
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/action-plan"
+            element={
+              <RequireAuth>
+                <RequireRole>
+                  <ActionPlan />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/dashboard"
+            element={
+              <RequireAuth>
+                <RequireRole>
+                  <Dashboard />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/progress"
+            element={
+              <RequireAuth>
+                <RequireRole>
+                  <ProgressDashboard />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/feedback"
+            element={
+              <RequireAuth>
+                <RequireRole>
+                  <Feedback />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/settings"
+            element={
+              <RequireAuth>
+                <RequireRole>
+                  <Settings />
+                </RequireRole>
+              </RequireAuth>
+            }
+          />
+
+          <Route path="*" element={<ErrorPage type="notFound" />} />
+
+        </Routes>
+      </Layout>
     </BrowserRouter>
   );
 }
